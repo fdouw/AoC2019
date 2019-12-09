@@ -16,15 +16,23 @@ namespace AoC2019
                 data = sr.ReadLine().Trim().Split(',').Select(s => Int64.Parse(s)).ToArray();  // All input is on the first line
             }
 
-            long[] quine = new long[] {109,1,204,-1,1001,100,1,100,1008,100,16,101,1006,101,0,99};
-            long[] bignum = new long[] {1102,34915192,34915192,7,4,7,99,0};
-            long[] bignum2 = new long[] {104,1125899906842624,99};
+            // Part 1
+            // long[] quine = new long[] {109,1,204,-1,1001,100,1,100,1008,100,16,101,1006,101,0,99};
+            // long[] bignum = new long[] {1102,34915192,34915192,7,4,7,99,0};
+            // long[] bignum2 = new long[] {104,1125899906842624,99};
             IntCodeMachine icm = new IntCodeMachine("ICM", data);
             long output;
             icm.Reset();
             while (icm.Next(new long[] {1}, out output))
             {
-                System.Console.WriteLine($"{output}");
+                System.Console.WriteLine($"1. {output}");
+            }
+
+            // Part 2
+            icm.Reset();
+            while (icm.Next(new long[] {2}, out output))
+            {
+                System.Console.WriteLine($"2. {output}");
             }
         }
     }
@@ -165,7 +173,7 @@ namespace AoC2019
             output = Int64.MaxValue;
 
             bool running = true;
-            long a, b, c;
+            long a, b;
             while (running)
             {
                 long cmd = code[idx++];
@@ -242,7 +250,7 @@ namespace AoC2019
                         // WriteAction(idx - 2, $"[{cmd,4}] RELBASE {a} from {relBase - a} to {relBase}");
                         break;
                     case OP_END:
-                        Console.WriteLine("OP_END");
+                        // Console.WriteLine("OP_END");
                         // WriteAction($"[{name}][END] idx = {idx}");
                         active = false;
                         return false;

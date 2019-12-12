@@ -98,7 +98,7 @@ namespace AoC2019
             {
                 for (int x = minX; x <= maxX; x++)
                 {
-                    if (white.Contains((x,y))) System.Console.Write("\u2588");
+                    if (white.Contains((x,y))) System.Console.Write("\u2587");
                     else System.Console.Write(" ");
                 }
                 System.Console.WriteLine("");

@@ -25,15 +25,15 @@ namespace AoC2019
                     // result
                     string[] item = formula[1].Trim().Split(" ");
                     if (!reaction.ContainsKey(item[1]))
-                        reaction.Add(item[1], new Reaction(item[1], Int32.Parse(item[0])));
+                        reaction.Add(item[1], new Reaction(item[1], Int64.Parse(item[0])));
                     Reaction result = reaction[item[1]];
-                    result.Output = Int32.Parse(item[0]);
+                    result.Output = Int64.Parse(item[0]);
 
                     // sources
                     foreach (string s in formula[0].Split(","))
                     {
                         item = s.Trim().Split(" ");
-                        result.AddSource(item[1], Int32.Parse(item[0]));
+                        result.AddSource(item[1], Int64.Parse(item[0]));
                         if (!reaction.ContainsKey(item[1]))
                             reaction.Add(item[1], new Reaction(item[1], 0));    // Skeleton reaction, to add product to
                         reaction[item[1]].AddProduct(result.Name, result.Output);                        
@@ -41,15 +41,49 @@ namespace AoC2019
                 }
             }
 
-            IEnumerable<string> ordered = new Topological(reaction).GetOrdered();
-            Dictionary<string, int> quantity = new Dictionary<string, int>(ordered.Count());
-            quantity["FUEL"] = 1;
+            // Part 1
+            long requiredOre = GetRequiredOre(reaction);
+            System.Console.WriteLine($"1. {requiredOre}");
 
+            // Part 2
+            long target = 1_000_000_000_000;
+            long lower = (target / requiredOre) - 1_000;
+            long higher = (target / requiredOre) + 1_000_000_000;
+            while (lower < higher)
+            {
+                long mid = (lower + higher) / 2;
+                long guess = GetRequiredOre(reaction, mid);
+                if (guess > target)
+                {
+                    // System.Console.WriteLine($"MORE: {guess}");
+                    higher = mid;
+                }
+                else if (guess < target)
+                {
+                    // System.Console.WriteLine($"LESS: {guess}");
+                    if (mid == lower) break;
+                    lower = mid;
+                }
+                else
+                {
+                    lower = mid;
+                    break;
+                }
+            }
+            System.Console.WriteLine($"2. {lower}");
+        }
+
+        private static long GetRequiredOre(Dictionary<string, Reaction> reaction, long fuelTarget = 1)
+        {
+            IEnumerable<string> ordered = new Topological(reaction).GetOrdered();
+            Dictionary<string, long> quantity = new Dictionary<string, long>(ordered.Count());
+            quantity["FUEL"] = fuelTarget;
+            
             foreach (string item in ordered)
             {
-                int output = reaction[item].Output;
-                int needed = quantity[item];
-                int toMake = (int)Math.Ceiling((decimal)needed / output);
+                long output = reaction[item].Output;
+                long needed = quantity[item];
+                long toMake = (long)Math.Ceiling((decimal)needed / output);
                 foreach (var dependency in reaction[item].GetDependencies())
                 {
                     if (quantity.ContainsKey(dependency.Key))
@@ -58,7 +92,7 @@ namespace AoC2019
                         quantity.Add(dependency.Key, dependency.Value * toMake);
                 }
             }
-            System.Console.WriteLine($"1. {quantity["ORE"]}");
+            return quantity["ORE"];
         }
     }
 
@@ -96,29 +130,29 @@ namespace AoC2019
     class Reaction
     {
         public string Name { get; }
-        public int Output { get; set; }
-        private Dictionary<string,int> input = new Dictionary<string, int>();       // Chemicals that go into Name
-        private Dictionary<string, int> product = new Dictionary<string, int>();    // Chemicals that require Name
+        public long Output { get; set; }
+        private Dictionary<string,long> input = new Dictionary<string, long>();       // Chemicals that go into Name
+        private Dictionary<string, long> product = new Dictionary<string, long>();    // Chemicals that require Name
 
-        public Reaction (string name, int output = 1)
+        public Reaction (string name, long output = 1)
         {
             this.Name = name;
             this.Output = output;
         }
 
-        public void AddSource(string name, int quantity)
+        public void AddSource(string name, long quantity)
         {
             input.Add(name, quantity);
         }
 
-        public void AddProduct(string name, int quantity)
+        public void AddProduct(string name, long quantity)
         {
             product.Add(name, quantity);
         }
 
-        public IEnumerable<KeyValuePair<string, int>> GetDependencies () => input;
+        public IEnumerable<KeyValuePair<string, long>> GetDependencies () => input;
 
-        public IEnumerable<KeyValuePair<string, int>> GetProducts () => product;
+        public IEnumerable<KeyValuePair<string, long>> GetProducts () => product;
     }
 
     class Ore : Reaction

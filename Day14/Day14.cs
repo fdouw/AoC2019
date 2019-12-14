@@ -11,82 +11,118 @@ namespace AoC2019
         {
             System.Console.WriteLine("Day 14");
 
-            string filename = "input-ex-13312";
-            Dictionary<string, Chemical> material = new Dictionary<string, Chemical>();
-            material.Add("ORE", new Ore());
+            string filename = "input";
+            Dictionary<string, Reaction> reaction = new Dictionary<string, Reaction>();
+            reaction.Add("ORE", new Reaction("ORE"));
+
             using (StreamReader sr = new StreamReader(filename))
             {
                 string[] data = sr.ReadToEnd().Trim().Split("\n");
                 foreach (string line in data)
                 {
                     string[] formula = line.Split("=>");
+
                     // result
                     string[] item = formula[1].Trim().Split(" ");
-                    if (material.ContainsKey(item[1]))
-                        material[item[1]].Quantity = Decimal.Parse(item[0]);
-                    else
-                        material.Add(item[1], new Chemical(item[1], Int32.Parse(item[0])));
-                    Chemical result = material[item[1]];
+                    if (!reaction.ContainsKey(item[1]))
+                        reaction.Add(item[1], new Reaction(item[1], Int32.Parse(item[0])));
+                    Reaction result = reaction[item[1]];
+                    result.Output = Int32.Parse(item[0]);
+
                     // sources
                     foreach (string s in formula[0].Split(","))
                     {
                         item = s.Trim().Split(" ");
-                        if (!material.ContainsKey(item[1]))
-                        {
-                            material.Add(item[1], new Chemical(item[1]));
-                        }
-                        result.AddSource(material[item[1]], Int32.Parse(item[0]));
+                        result.AddSource(item[1], Int32.Parse(item[0]));
+                        if (!reaction.ContainsKey(item[1]))
+                            reaction.Add(item[1], new Reaction(item[1], 0));    // Skeleton reaction, to add product to
+                        reaction[item[1]].AddProduct(result.Name, result.Output);                        
                     }
                 }
             }
-            System.Console.WriteLine($"1. {material["FUEL"].GetOreRequired(1)}");
-            foreach(Chemical item in material.Values) System.Console.WriteLine(item.ToString());
+
+            IEnumerable<string> ordered = new Topological(reaction).GetOrdered();
+            Dictionary<string, int> quantity = new Dictionary<string, int>(ordered.Count());
+            quantity["FUEL"] = 1;
+
+            foreach (string item in ordered)
+            {
+                int output = reaction[item].Output;
+                int needed = quantity[item];
+                int toMake = (int)Math.Ceiling((decimal)needed / output);
+                foreach (var dependency in reaction[item].GetDependencies())
+                {
+                    if (quantity.ContainsKey(dependency.Key))
+                        quantity[dependency.Key] += dependency.Value * toMake;
+                    else
+                        quantity.Add(dependency.Key, dependency.Value * toMake);
+                }
+            }
+            System.Console.WriteLine($"1. {quantity["ORE"]}");
         }
     }
 
-    class Chemical
+    class Topological
     {
-        string Name { get; }
-        public decimal Quantity { get; set; }   // Quantity of this material produced by single reaction
+        private List<string> depthFirstOrder;
+        private HashSet<string> marked;
 
-        private Dictionary<Chemical,int> sourceMaterial = new Dictionary<Chemical, int>();
+        public Topological (Dictionary<string, Reaction> reaction)
+        {
+            depthFirstOrder = new List<string>(reaction.Count);
+            marked = new HashSet<string>(reaction.Count);
 
-        public Chemical (string name, int quantity = 1)
+            foreach(string item in reaction.Keys)
+                if (!marked.Contains(item))
+                    DepthFirstSearch(reaction, item);
+            
+            // depthFirstOrder.Reverse();
+        }
+
+        private void DepthFirstSearch (Dictionary<string, Reaction> reaction, string start)
+        {
+            marked.Add(start);
+
+            foreach (var item in reaction[start].GetProducts())
+                if (!marked.Contains(item.Key))
+                    DepthFirstSearch(reaction, item.Key);
+
+            depthFirstOrder.Add(start);
+        }
+
+        public IEnumerable<string> GetOrdered() => depthFirstOrder;
+    }
+
+    class Reaction
+    {
+        public string Name { get; }
+        public int Output { get; set; }
+        private Dictionary<string,int> input = new Dictionary<string, int>();       // Chemicals that go into Name
+        private Dictionary<string, int> product = new Dictionary<string, int>();    // Chemicals that require Name
+
+        public Reaction (string name, int output = 1)
         {
             this.Name = name;
-            this.Quantity = quantity;
+            this.Output = output;
         }
 
-        public void AddSource(Chemical chemical, int quantity)
+        public void AddSource(string name, int quantity)
         {
-            sourceMaterial.Add(chemical, quantity);
+            input.Add(name, quantity);
         }
 
-        public virtual decimal GetOreRequired(decimal units = 1)
+        public void AddProduct(string name, int quantity)
         {
-            decimal sum = 0;
-            foreach (var item in sourceMaterial)
-            {
-                sum += item.Key.GetOreRequired(item.Value);
-            }
-            System.Console.WriteLine($"{sum} ORE makes {Quantity} {Name}");
-            sum *= Math.Ceiling(units / Quantity);  // In integer increments
-            return sum;
-            //return sourceMaterial.Sum(x => x.Key.GetOreRequired(x.Value)) * units / Quantity;
+            product.Add(name, quantity);
         }
 
-        public override string ToString()
-        {
-            string s = String.Join(", ", sourceMaterial.Select(x => $"{x.Value} {x.Key.Name}").ToArray());
-            s += $" => {this.Quantity} {this.Name}";
-            return s;
-        }
+        public IEnumerable<KeyValuePair<string, int>> GetDependencies () => input;
+
+        public IEnumerable<KeyValuePair<string, int>> GetProducts () => product;
     }
 
-    class Ore : Chemical
+    class Ore : Reaction
     {
         public Ore () : base("Ore") { }
-
-        public override decimal GetOreRequired(decimal units) => units;
     }
 }

@@ -2,17 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading;
 
 namespace AoC2019
 {
-    public enum Tile
-    {
-        Wall = 0,
-        Empty = 1,
-        System = 2
-    }
-
     class Day15
     {        
         static void Main(string[] args)
@@ -28,402 +20,200 @@ namespace AoC2019
             }
             
             // Part 1
-            Room currentRoom = Room.CreateOrigin();
+            Room currentRoom = new Room(0, 0);
             icm.Reset();
             while (icm.active)
             {
-                System.Console.WriteLine($"{currentRoom.ToString()}");
-                Room nextRoom = currentRoom.Explore(icm);
-                if (nextRoom == null)
+                int dir = currentRoom.NextDirection();
+                if (dir < 5)
                 {
-                    // We hit a dead end
-                    System.Console.WriteLine($"No more rooms to explore!");
-                    break;
+                    (int x, int y) = currentRoom.Neighbour(dir);
+                    if (Room.GetRoom(x, y) == null)
+                    {
+                        int response;
+                        icm.Next(dir, out response);
+                        if (response == Room.WALL)
+                        {
+                            new Room(x, y, Room.opposite[dir], Room.WALL);
+                        }
+                        else if (response == Room.EMPTY)
+                        {
+                            Room room = new Room(x, y, Room.opposite[dir], Room.EMPTY);
+                            currentRoom = room;
+                        }
+                        else if (response == Room.SYSTEM)
+                        {
+                            Room room = new Room(x, y, Room.opposite[dir], Room.SYSTEM);
+                            currentRoom = room;
+                        }
+                        else
+                        {
+                            throw new Exception($"Unknown response: {response}");
+                        }
+                    }
                 }
-                if (nextRoom.IsSystem)
+                else
                 {
-                    System.Console.WriteLine($"1. {nextRoom.DistanceToStart}");
-                    return;
+                    // All option have been explored: backtrack to previous room
+                    dir = currentRoom.PreviousDir;
+                    if (dir > 0)
+                    {
+                        int response;
+                        icm.Next(dir, out response);
+                        if (response == Room.EMPTY || response == Room.SYSTEM)
+                        {
+                            (int x, int y) = currentRoom.Neighbour(dir);
+                            currentRoom = Room.GetRoom(x, y);
+                        }
+                        else
+                        {
+                            throw new Exception($"Unknown or unexpected response for previous room: {response}");
+                        }
+                    }
+                    else
+                    {
+                        // No more options
+                        // TODO: pathfinding
+                        System.Console.WriteLine("Found all rooms?");
+
+                        // Draw the maze
+                        int xMin = Int32.MaxValue;
+                        int xMax = Int32.MinValue;
+                        int yMin = Int32.MaxValue;
+                        int yMax = Int32.MinValue;
+                        foreach ((int x, int y) p in Room.AllRooms.Keys)
+                        {
+                            if (p.x < xMin) xMin = p.x;
+                            if (p.x > xMax) xMax = p.x;
+                            if (p.y < yMin) yMin = p.y;
+                            if (p.y > yMax) yMax = p.y;
+                        }
+                        System.Console.WriteLine($"Canvas: ({xMin},{yMin}) to ({xMax},{yMax}).");
+                        for (int y = yMin; y <= yMax; y++)
+                        {
+                            string line = "";
+                            for (int x = xMin; x <= xMax; x++)
+                            {
+                                if (Room.AllRooms.ContainsKey((x,y)))
+                                    line += Room.AllRooms[(x,y)].GetImage();
+                                else
+                                    line += "@";
+                            }
+                            System.Console.WriteLine(line);
+                        }
+
+                        currentRoom = Room.OxygenSystem;
+                        int distance = 0;
+                        while (currentRoom.PreviousDir != 0)
+                        {
+                            distance++;
+                            currentRoom = Room.GetRoom(currentRoom.PreviousRoom());
+                        }
+                        System.Console.WriteLine($"1. {distance}");
+
+                        bool changed = true;
+                        while (changed)
+                        {
+                            changed = false;
+                            foreach(Room room in Room.AllRooms.Values)
+                            {
+                                changed = room.UpdateDistanceToSystem() || changed;
+                            }
+                        }
+                        int time = Room.AllRooms.Values.Where(x => !x.IsWall).Select(x => x.DistanceToSystem).Max();
+                        System.Console.WriteLine($"2. {time}");
+                        break;
+                    }
                 }
-                currentRoom = nextRoom;
             }
         }
     }
 
     class Room
     {
-        private static int[] DX = new int[] {0,0,1,-1};  // North, South, West, East
-        private static int[] DY = new int[] {1,-1,0,0};  // North, South, West, East
-        private static int[] opposite = new int[] {1,0,3,2};
+        public const int WALL = 0;
+        public const int EMPTY = 1;
+        public const int SYSTEM = 2;
 
-        private static Dictionary<(int x, int y), Room> pool = new Dictionary<(int x, int y), Room>();
-        private static Dictionary<(int x, int y), int> area = new Dictionary<(int x, int y), int>();
+        // Collection of all rooms found so far
+        public static Dictionary<(int x, int y), Room> AllRooms = new Dictionary<(int x, int y), Room>();
 
-        Room[] neighbour = new Room[4];   // North, South, West, East
-        public Room Previous { get; private set; }
-        public int PreviousDir { get; private set; }
+        // Remember the room with the ogygen system (should be 1?)
+        public static Room OxygenSystem { get; private set; }
+
+        // Movement commands are: north (1), south (2), west (3), and east (4); hence the leading 0.
+        static int[] DX = new int[] { 0, 0, 0, 1, -1 };
+        static int[] DY = new int[] { 0, 1, -1, 0, 0 };
+
+        // Index / command for moving in the opposite direction, again 1-based indexed.
+        public static int[] opposite = new int[] { 0, 2, 1, 4, 3 };
+        
+        int searchPointer = 1;          // Direction to search
+        public int PreviousDir { get; } // Direction of the previous room
+        private int type;               // Type: 0 = wall, 1 = empty, 2 = system
         public int X { get; }
         public int Y { get; }
-        public int DistanceToStart { get => Previous?.DistanceToStart + 1 ?? 0; }
-        private int exploreDir = 0;
+        public int DistanceToSystem = Int32.MaxValue - 1;
 
-        public bool IsSystem { get; }
+        public bool HasSystem { get => type == SYSTEM; }
+        public bool IsWall { get => type == WALL; }
 
-        public static Room CreateRoom (Room prev, int dir, bool system = false)
+        public Room (int x, int y, int prev = 0, int type = EMPTY)
         {
-            if (prev == null)
-                throw new ArgumentNullException("prev", "Could not create room from empty source.");
-            if (dir < 0 || dir > 3)
-                throw new ArgumentOutOfRangeException("dir", "Direction must be within [0,3].");
-            
-            int x = prev.X + DX[dir];
-            int y = prev.Y + DY[dir];
-            int d = prev.DistanceToStart + 1;
-            int fromDir = opposite[dir];
-            
-            if (pool.ContainsKey((x,y)))
-            {
-                System.Console.WriteLine("Returning existing room!");
-                // Return existing
-                if (pool[(x,y)].DistanceToStart > d)
-                {
-                    pool[(x,y)].SetPrevious(prev, fromDir);
-                }
-                return pool[(x,y)];
-            }
-            else
-            {
-                return new Room(x, y, prev, system);
-            }
-        }
-
-        public static Room CreateOrigin ()
-        {
-            return new Room(0, 0);
-        }
-
-        private Room (int x, int y, Room prev = null, bool system = false)
-        {
+            AllRooms.Add((x,y), this);
+            this.PreviousDir = prev;
+            this.type = type;
             this.X = x;
             this.Y = y;
-            this.IsSystem = system;
-            Previous = prev;
-            if (Previous != null)
+            // System.Console.WriteLine($"New room[{AllRooms.Count}]: ({X}, {Y}), type: {type}, previous dir: {prev}.");
+            if (type == SYSTEM)
             {
-                if (prev.X > this.X) PreviousDir = 3;
-                else if (prev.X < this.X) PreviousDir = 2;
-                else if (prev.Y > this.Y) PreviousDir = 1;
-                else if (prev.Y < this.Y) PreviousDir = 0;
+                OxygenSystem = this;
+                DistanceToSystem = 0;
+                System.Console.WriteLine($"Found SYSTEM at ({X}, {Y}).");
             }
-            pool.Add((x, y), this);
-            area.Add((x, y), system ? 2 : 1);
         }
 
-        void SetPrevious(Room prev, int fromDir)
+        public string GetImage()
         {
-            this.neighbour[fromDir] = prev;
-            this.Previous = prev;
-            this.PreviousDir = fromDir;
+            if (type == WALL) return "\u2587";
+            if (type == EMPTY) return (X == 0 && Y == 0) ? "S" : " ";
+            if (type == SYSTEM) return "O";
+            return "?";
         }
 
-        public Room Explore (IntCodeMachine icm)
+        public bool UpdateDistanceToSystem ()
         {
-            for (int d = exploreDir; d < 4; d++)
+            bool changed = false;
+            if (type == EMPTY)
             {
-                if (neighbour[d] == null)
+                for (int dir = 1; dir < 5; dir++)
                 {
-                    int response;
-                    icm.Next(d+1, out response);
-                    if (response == 0)
+                    int dist = GetRoom(Neighbour(dir))?.DistanceToSystem ?? Int32.MaxValue;
+                    if (dist + 1 < this.DistanceToSystem)
                     {
-                        // Hit a wall, keep looking
-                        //area[(X + DX[d], Y + DY[d])] = 0;
-                        continue;
+                        changed = true;
+                        this.DistanceToSystem = dist + 1;
                     }
-                    if (response == 1 || response == 2)
-                    {
-                        if (PoolContains(this, d))
-                        {
-                            // Do not venture into this room: make sure the icm returns too
-                            icm.Next(opposite[d] + 1, out _);
-                            continue;
-                        }
-                        else
-                        {
-                            // Move to new room
-                            neighbour[d] = CreateRoom(this, d, (response == 2));
-                            exploreDir = d + 1;
-                            return neighbour[d];
-                        }
-                    }
-                    // Should not get here...
-                    throw new Exception($"Unknown reply from robot: {response}, in room: ({X},{Y}).");
                 }
             }
-
-            // Did not find a next room: backtrack
-            exploreDir = 4;
-            icm.Next(PreviousDir + 1, out _);   // Make sure the icm also returns
-            return Previous;
+            return changed;
         }
 
-        public Room NextRoom (IntCodeMachine icm, bool backtrack = false)
+        public (int, int) Neighbour (int dir) => (X + DX[dir], Y + DY[dir]);
+
+        public (int, int) PreviousRoom () => Neighbour(PreviousDir);
+
+        public int NextDirection () => searchPointer++;
+
+        public static Room GetRoom (int x, int y)
         {
-            for (int d = 0; d < 4; d++)
-            {
-                if (neighbour[d] == null)
-                {
-                    int response;
-                    icm.Next(d+1, out response);
-                    if (response == 0)
-                    {
-                        // Hit a wall, keep looking
-                        continue;
-                    }
-                    if (response == 1 || response == 2)
-                    {
-                        // Move to new room
-                        neighbour[d] = CreateRoom(this, d, (response == 2));
-                        return neighbour[d];
-                    }
-                    // Should not get here...
-                    throw new Exception($"Unknown reply from robot: {response}, in room: ({X},{Y}).");
-                }
-                else if (backtrack)
-                {
-                    int response;
-                    icm.Next(d+1, out response);
-                    if (response == 0)
-                    {
-                        // Hit a wall, keep looking
-                        continue;
-                    }
-                    if (response == 1 || response == 2)
-                    {
-                        // Move to empty room
-                        return neighbour[d];
-                    }
-                    // Should not get here...
-                    throw new Exception($"Unknown reply from robot: {response}, in room: ({X},{Y}).");
-                }
-            }
-            // Did not move
-            return this;
+            if (AllRooms.ContainsKey((x,y)))
+                return AllRooms[(x, y)];
+            else
+                return null;
         }
 
-        public override string ToString () => $"({X}, {Y}) (dist: {DistanceToStart})";
-
-        public static bool PoolContains(Room room) => pool.ContainsValue(room);
-        public static bool PoolContains(Room room, int dir) => pool.ContainsKey((room.X + DX[dir], room.Y + DY[dir]));
-        public static bool PoolContains((int, int) coord) => pool.ContainsKey(coord);
-    }
-
-    class IntCodeTape
-    {
-        private int[] initialCode;
-        Dictionary<int,int> code;
-
-        public IntCodeTape(int[] data)
-        {
-            initialCode = new int[data.Length];
-            code = new Dictionary<int, int>(data.Length);
-            Array.Copy(data, initialCode, data.Length);
-            Reset();
-        }
-
-        public int this[int index] {
-            get
-            { 
-                return (code.ContainsKey(index)) ? code[index] : 0;
-            }
-            set
-            {
-                code[index] = value;
-            }
-        }
-
-        public void Reset()
-        {
-            code.Clear();
-            for (int i = 0; i < initialCode.Length; i++) code.Add(i, initialCode[i]);
-        }
-    }
-    
-    class IntCodeMachine
-    {
-        public const int OP_ADD = 1;    // Add
-        public const int OP_MUL = 2;    // Multiply
-        public const int OP_IN = 3;     // Input value
-        public const int OP_OUT = 4;    // Output value
-        public const int OP_JMP_T = 5;  // Jump if true
-        public const int OP_JMP_F = 6;  // Jump if false
-        public const int OP_LT = 7;     // Less than
-        public const int OP_EQ = 8;     // Equals
-        public const int OP_SRB = 9;    // Set Relative Base
-        public const int OP_END = 99;
-
-        public const int MOD_POS = 0;
-        public const int MOD_VAL = 1;
-        public const int MOD_REL = 2;   // Relative Base for addressing
-
-        public string name { get; }     // Identifier for the machine instance
-        private IntCodeTape code;       // Current state
-        private int idx;                // Execution pointer
-        private int relBase;            // Relative Base, used for relative addressing
-        
-        public bool active { get; private set; }   // Is the machine currently running
-
-        public IntCodeMachine (string name, int[] data)
-        {
-            this.name = name;
-            this.code = new IntCodeTape(data);
-        }
-
-        public int Run (int[] input, bool force = false)
-        {
-            if (active && !force) throw new Exception($"Machine [{name}] already active");
-
-            int output;
-            Start(input, out output);   // Assume the machine has no intermediate output!
-            return output;
-        }
-
-        public void Reset()
-        {
-            code.Reset();
-            idx = 0;
-            relBase = 0;
-            active = true;
-        }
-
-        public void Stop() =>  active = false;
-
-        public bool Start (int[] input, out int output)
-        {
-            Reset();
-            return Next(input, out output);
-        }
-
-        private int Read(int index, int mode)
-        {
-            switch (mode)
-            {
-                case MOD_POS:
-                    return code[code[index]];
-                case MOD_VAL:
-                    return code[index];
-                case MOD_REL:
-                    return code[relBase + code[index]];
-                default:
-                    throw new Exception($"Unknown mode: {mode}");
-            }
-        }
-
-        private void Write(int index, int mode, int value)
-        {
-            switch (mode)
-            {
-                case MOD_POS:
-                    code[code[index]] = value;
-                    break;
-                case MOD_VAL:
-                    throw new Exception("MOD_VAL is invalid for writing");
-                case MOD_REL:
-                    code[relBase + code[index]] = value;
-                    break;
-                default:
-                    throw new Exception($"Unknown mode: {mode}");
-            }
-        }
-
-        private void WriteAction (int line, string msg)
-        {
-            System.Console.WriteLine($"[{line,2}] {msg}");
-        }
-
-        public bool Next(int input, out int output) => Next(new int[]{input}, out output);
-
-        public bool Next(int[] inputs, out int output)
-        {
-            // Machine must have been initialised
-            if (!active) throw new Exception("Machine not active");
-            
-            int in_ptr = 0;     // current position in the input array
-
-            // Guarantee that we have output
-            output = Int32.MaxValue;
-
-            bool running = true;
-            int a, b;
-            while (running)
-            {
-                int cmd = code[idx++];
-                int opcode = cmd % 100;
-                int mode1 = (cmd / 100) % 10;
-                int mode2 = (cmd / 1000) % 10;
-                int mode3 = (cmd / 10000) % 10;
-
-                switch (opcode)
-                {
-                    case OP_ADD:
-                        a = Read(idx++, mode1);
-                        b = Read(idx++, mode2);
-                        Write(idx++, mode3, a + b);
-                        break;
-                    case OP_MUL:
-                        a = Read(idx++, mode1);
-                        b = Read(idx++, mode2);
-                        Write(idx++, mode3, a * b);
-                        break;
-                    case OP_IN:
-                        a = inputs[in_ptr++];   // Assume enough inputs
-                        Write(idx++, mode1, a);
-                        break;
-                    case OP_OUT:
-                        output = Read(idx++, mode1);
-                        return true;
-                    case OP_JMP_T:
-                        a = Read(idx++, mode1);
-                        b = Read(idx++, mode2);
-                        if (a != 0)
-                        {
-                            idx = b;
-                        }
-                        break;
-                    case OP_JMP_F:
-                        a = Read(idx++, mode1);
-                        b = Read(idx++, mode2);
-                        if (a == 0)
-                        {
-                            idx = b;
-                        }
-                        break;
-                    case OP_LT:
-                        a = Read(idx++, mode1);
-                        b = Read(idx++, mode2);
-                        Write(idx++, mode3, (a < b) ? 1 : 0);
-                        break;
-                    case OP_EQ:
-                        a = Read(idx++, mode1);
-                        b = Read(idx++, mode2);
-                        Write(idx++, mode3,(a == b) ? 1 : 0);
-                        break;
-                    case OP_SRB:
-                        a = Read(idx++, mode1);
-                        relBase += a;
-                        break;
-                    case OP_END:
-                        active = false;
-                        return false;
-                    default:
-                        active = false;
-                        throw new Exception($"Unknown OpCode: {opcode}");
-                }
-            }
-
-            // End of run, but no output set (apparently)
-            active = false;
-            return false;
-        }
+        public static Room GetRoom ((int x, int y) dir) => GetRoom(dir.x, dir.y);
     }
 }

@@ -99,7 +99,7 @@ namespace AoC2019
                 newData = tmp;
                 Array.Clear(newData, offset, newData.Length - offset);
             }
-            System.Console.WriteLine($"1. {String.Concat(data).Substring(offset,8)}");
+            System.Console.WriteLine($"2. {String.Concat(data).Substring(offset,8)}");
         }
     }
 }

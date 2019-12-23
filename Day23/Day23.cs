@@ -1,120 +1,123 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace AoC2019
 {
     class Day23
     {
-        internal static List<long> Result = new List<long>();
+        public const int N = 50;
 
         public static void Main (string[] args)
         {
             System.Console.WriteLine("Day 23");
 
             string filename = "input";
-            IcmManager[] manager = new IcmManager[50];
-            Task<long>[] tasks = new Task<long>[50];
+            IcmManager[] manager = new IcmManager[N];
             using (StreamReader sr = new StreamReader(filename))
             {
                 long[] code = sr.ReadLine().Trim().Split(",").Select(s => Int64.Parse(s)).ToArray();
-                for (long i = 0; i < 50; i++)
+                for (int i = 0; i < N; i++)
                 {
-                    manager[i] = new IcmManager(code);
-                }
-                for (long i = 0; i < 50; i++)
-                {
-                    long j = i;
-                    tasks[i] = Task<long>.Run(() => manager[j].Start());
+                    manager[i] = new IcmManager(code, i);
                 }
             }
 
             // Part 1
-            long result = Task<long>.WaitAny(tasks);
-            System.Console.WriteLine($"1. {result}");
-            foreach(long res in Day23.Result)
-                System.Console.WriteLine($"1x {res}");
-            // for (int i = 0; i < 50; i++)
-            //     System.Console.WriteLine($" {i,2}: {manager[i].Result,4}");
+            long answer = 0;
+            bool running = true;
+            while (running)
+            {
+                for (int i = 0; i < N; i++)
+                {
+                    if (manager[i].Active && manager[i].Tick(out answer))
+                    {
+                        running = false;
+                        break;
+                    }
+                }
+            }
+            System.Console.WriteLine($"1. {answer}");
         }
     }
 
     class IcmManager
     {
-        private static List<IcmManager> allManagers = new List<IcmManager>();
+        private static IcmManager[] allManagers = new IcmManager[Day23.N];
 
         private IntCodeMachine icm;
 
         private Queue<long> input = new Queue<long>();
         private Queue<long> output = new Queue<long>();
 
-        internal long Result { get; private set; }
+        private long? answer;
 
-        internal IcmManager (long[] code)
+        internal bool Active { get => icm.Active; }
+
+        internal IcmManager (long[] code, int Id)
         {
-            icm = new IntCodeMachine($"Icm[{allManagers.Count}]", code);
-            icm.Input += new IcmInputReader(InputToIcm);
-            icm.Output += new IcmOutputWriter(OutputFromIcm);
+            input.Enqueue(Id);
+            icm = new IntCodeMachine($"Icm[{Id}]", code);
+            icm.Input += new IcmInputReader(this.InputToIcm);
+            icm.Output += new IcmOutputWriter(this.OutputFromIcm);
             icm.Reset();
-            allManagers.Add(this);
+            allManagers[Id] = this;
         }
-
-        internal long Start ()
+        
+        internal bool Tick (out long value)
         {
-            System.Console.WriteLine($"Started");
-            icm.Run();
-            return Result;
+            icm.Tick();
+            if (answer != null)
+            {
+                value = (long)answer;
+                return true;
+            }
+            else
+            {
+                value = Int64.MaxValue;
+                return false;
+            }
         }
 
-        private bool sendY = false;
+        private bool sendY = true;  // offset to send the id first, then x,y in pairs
         public long InputToIcm ()
         {
-            lock (input)
+            if (sendY || input.Count > 1)
             {
-                if (sendY || input.Count > 1)
-                {
-                    sendY = !sendY;
-                    return input.Dequeue();
-                }
-                else
-                {
-                    return -1;
-                }
+                sendY = !sendY;
+                return input.Dequeue();
+            }
+            else
+            {
+                return -1;
             }
         }
 
         public void OutputFromIcm (long value)
         {
-            lock (output)
+            output.Enqueue(value);
+            if (output.Count >= 3)
             {
-                lock (Day23.Result)
-                {
-                    output.Enqueue(value);
-                    if (output.Count >= 3)
-                    {
-                        long address = output.Dequeue();
-                        long x = output.Dequeue();
-                        long y = output.Dequeue();
-                        allManagers[(int)address].AddPacket(x, y);
+                long address = output.Dequeue();
+                long x = output.Dequeue();
+                long y = output.Dequeue();
 
-                        if (address == 255)
-                        {
-                            Day23.Result.Add(y);
-                            System.Console.WriteLine($"{y}");
-                            Result = y;
-                            icm.Stop();
-                        }
-                    }
+                if (address == 255)
+                {
+                    answer = y;
+                }
+                else
+                {
+                    allManagers[(int)address].AddPacket(x, y);
+                    System.Console.WriteLine($"{icm.name}: send packet ({x}, {y}) to #{address}");
                 }
             }
         }
 
         public void AddPacket (long x, long y)
         {
+            System.Console.WriteLine($"{icm.name}: received packet ({x}, {y})");
             input.Enqueue(x);
             input.Enqueue(y);
         }

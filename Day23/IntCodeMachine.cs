@@ -24,7 +24,7 @@ namespace AoC2019
         private IntCodeTape code;       // Current state
         private long idx;                // Execution pointer
         
-        public bool active { get; private set; }   // Is the machine currently running
+        public bool Active { get; private set; }   // Is the machine currently running
 
         public event IcmInputReader Input;
         public event IcmOutputWriter Output;
@@ -48,125 +48,132 @@ namespace AoC2019
         public void Reset()
         {
             idx = 0;
-            active = true;
+            Active = true;
         }
 
         public void SetRegister(long address, long value)
         {
             // Machine must have been initialised
-            if (!active) throw new Exception("Machine not active");
+            if (!Active) throw new Exception("Machine not active");
             code[address] = value;
         }
 
-        public void Stop() =>  active = false;
+        public void Stop() =>  Active = false;
 
-        public bool Start (long[] input, out long output)
-        {
-            Reset();
-            return Next(input, out output);
-        }
+        // public bool Start (long[] input, out long output)
+        // {
+        //     Reset();
+        //     return Next(input, out output);
+        // }
 
         private void WriteAction (long line, string msg)
         {
             System.Console.WriteLine($"[{line,2}] {msg}");
         }
 
-        public bool Run(bool returnOnOutput = false)
+        public bool Tick ()
+        {
+            if (!Active) throw new Exception("Machine not active");
+
+            long cmd = code[idx++];
+            long opcode = cmd % 100;
+            long mode1 = (cmd / 100) % 10;
+            long mode2 = (cmd / 1000) % 10;
+            long mode3 = (cmd / 10000) % 10;
+
+            long a, b, output;
+            switch (opcode)
+            {
+                case OP_ADD:
+                    a = code.Read(idx++, mode1);
+                    b = code.Read(idx++, mode2);
+                    code.Write(idx++, mode3, a + b);
+                    break;
+                case OP_MUL:
+                    a = code.Read(idx++, mode1);
+                    b = code.Read(idx++, mode2);
+                    code.Write(idx++, mode3, a * b);
+                    break;
+                case OP_IN:
+                    a = Input();
+                    code.Write(idx++, mode1, a);
+                    break;
+                case OP_OUT:
+                    output = code.Read(idx++, mode1);
+                    Output(output);
+                    break;
+                case OP_JMP_T:
+                    a = code.Read(idx++, mode1);
+                    b = code.Read(idx++, mode2);
+                    if (a != 0)
+                    {
+                        idx = b;
+                    }
+                    break;
+                case OP_JMP_F:
+                    a = code.Read(idx++, mode1);
+                    b = code.Read(idx++, mode2);
+                    if (a == 0)
+                    {
+                        idx = b;
+                    }
+                    break;
+                case OP_LT:
+                    a = code.Read(idx++, mode1);
+                    b = code.Read(idx++, mode2);
+                    code.Write(idx++, mode3, (a < b) ? 1 : 0);
+                    break;
+                case OP_EQ:
+                    a = code.Read(idx++, mode1);
+                    b = code.Read(idx++, mode2);
+                    code.Write(idx++, mode3,(a == b) ? 1 : 0);
+                    break;
+                case OP_SRB:
+                    a = code.Read(idx++, mode1);
+                    code.AddRelativeBase(a);
+                    break;
+                case OP_END:
+                    Active = false;
+                    return false;
+                default:
+                    Active = false;
+                    throw new Exception($"Unknown OpCode: {opcode}");
+            }
+            return true;
+        }
+
+        public bool Run()
         {
             // Machine must have been initialised
-            if (!active) throw new Exception("Machine not active");
+            if (!Active) throw new Exception("Machine not active");
 
             bool running = true;
-            long a, b, output;
             while (running)
             {
-                long cmd = code[idx++];
-                long opcode = cmd % 100;
-                long mode1 = (cmd / 100) % 10;
-                long mode2 = (cmd / 1000) % 10;
-                long mode3 = (cmd / 10000) % 10;
-
-                switch (opcode)
-                {
-                    case OP_ADD:
-                        a = code.Read(idx++, mode1);
-                        b = code.Read(idx++, mode2);
-                        code.Write(idx++, mode3, a + b);
-                        break;
-                    case OP_MUL:
-                        a = code.Read(idx++, mode1);
-                        b = code.Read(idx++, mode2);
-                        code.Write(idx++, mode3, a * b);
-                        break;
-                    case OP_IN:
-                        a = Input();
-                        code.Write(idx++, mode1, a);
-                        break;
-                    case OP_OUT:
-                        output = code.Read(idx++, mode1);
-                        Output(output);
-                        running = !returnOnOutput;
-                        break;
-                    case OP_JMP_T:
-                        a = code.Read(idx++, mode1);
-                        b = code.Read(idx++, mode2);
-                        if (a != 0)
-                        {
-                            idx = b;
-                        }
-                        break;
-                    case OP_JMP_F:
-                        a = code.Read(idx++, mode1);
-                        b = code.Read(idx++, mode2);
-                        if (a == 0)
-                        {
-                            idx = b;
-                        }
-                        break;
-                    case OP_LT:
-                        a = code.Read(idx++, mode1);
-                        b = code.Read(idx++, mode2);
-                        code.Write(idx++, mode3, (a < b) ? 1 : 0);
-                        break;
-                    case OP_EQ:
-                        a = code.Read(idx++, mode1);
-                        b = code.Read(idx++, mode2);
-                        code.Write(idx++, mode3,(a == b) ? 1 : 0);
-                        break;
-                    case OP_SRB:
-                        a = code.Read(idx++, mode1);
-                        code.AddRelativeBase(a);
-                        break;
-                    case OP_END:
-                        active = false;
-                        return false;
-                    default:
-                        active = false;
-                        throw new Exception($"Unknown OpCode: {opcode}");
-                }
+                running = Tick();
             }
 
             // End of run, but no output set (apparently)
-            active = false;
+            Active = false;
             return false;
         }
 
-        public bool Next(long input, out long output) => Next(new long[]{input}, out output);
+        // public bool Next(long input, out long output) => Next(new long[]{input}, out output);
 
-        public bool Next(long[] inputs, out long output)
-        {
-            // Set input/output
-            inputData = inputs;         // Not copying: not safe!
-            inputPointer = 0;
-            Input = internalInput;      // Overwrite existing listeners
-            Output = internalOutput;
+        // public bool Next(long[] inputs, out long output)
+        // {
+        //     // Set input/output
+        //     inputData = inputs;         // Not copying: not safe!
+        //     inputPointer = 0;
+        //     Input = internalInput;      // Overwrite existing listeners
+        //     Output = internalOutput;
 
-            // Run the machine (but return on output)
-            bool response = Run(true);
-            output = outputData;
+        //     // Run the machine (but return on output)
+        //     bool response = Run(true);
+        //     output = outputData;
 
-            return response;
-        }
+        //     return response;
+        // }
     }
 
     class IntCodeTape
